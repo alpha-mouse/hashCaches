@@ -21,9 +21,12 @@ namespace hashCaches
         static int requestsCount;
         static int cachesCount;
         static int cacheCapacity;
+        static Dictionary<int, Request[]> videoRequests;
+        static Request[,][] cacheVideoRequests;
+        static bool[,] cacheEndpointConnections;
         static void Main(string[] args)
         {
-            var infile = "me_at_the_zoo.in";//args[0];
+            var infile = args.Length == 0 ? "me_at_the_zoo.in" : args[0];
 
             int[] videoSizes;
             int[,] latencies;
@@ -38,6 +41,8 @@ namespace hashCaches
                 cachesCount = int.Parse(parts[3]);
                 cacheCapacity = int.Parse(parts[4]);
 
+                cacheVideoRequests = new Request[cachesCount,videosCount][];
+                cacheEndpointConnections = new bool[cachesCount,endpointsCount];
                 line = sr.ReadLine();
                 videoSizes = line.Split(' ').Select(Int32.Parse).ToArray();
                 latencies = new int[cachesCount + 1, endpointsCount];
@@ -56,6 +61,7 @@ namespace hashCaches
                         line = sr.ReadLine();
                         parts = line.Split(' ');
                         var cacheNumber = Int32.Parse(parts[0]);
+                        cacheEndpointConnections[cacheNumber, e] = true;
                         latencies[cacheNumber, e] = Int32.Parse(parts[1]);
                     }
                 }
@@ -72,16 +78,21 @@ namespace hashCaches
                         Number = Int32.Parse(parts[2]),
                     };
                 }
+                videoRequests = requests.GroupBy(r => r.Video).ToDictionary(r => r.Key, r => r.ToArray());
+                for (int c = 0; c < cachesCount; c++)
+                {
+                    for (int v = 0; v < videosCount; v++)
+                    {
+                        cacheVideoRequests[c, v] =
+                            requests.Where(r => r.Video == v && cacheEndpointConnections[c, r.Endpoint]).ToArray();
+                    }
+                }
             }
 
             bool[,] videoPlacements = new bool[cachesCount, videosCount];
 
             double[,] score = new double[cachesCount, videosCount];
 
-            for (int v = 0; v < videosCount; v++)
-            {
-                FillVideoEconomies(score, v, videoPlacements, latencies, requests, videoSizes);
-            }
             //for (int c = 0; c < cachesCount; c++)
             //{
             //    for (int v = 0; v < videosCount; v++)
@@ -106,6 +117,11 @@ namespace hashCaches
             {
                 cacheFreeCapacities[c] = cacheCapacity;
             }
+            Console.WriteLine("BEGIIN");
+            for (int v = 0; v < videosCount; v++)
+            {
+                FillVideoEconomies(score, v, videoPlacements, latencies, requests, videoSizes);
+            }
             while (true)
             {
                 var bestEconomy = ArgMax(score);
@@ -118,14 +134,17 @@ namespace hashCaches
                     score[candCache, candVideo] = 0;
                     continue;
                 }
-                if (videoSizes[candVideo]>cacheFreeCapacities[candCache])
+                if (videoSizes[candVideo] > cacheFreeCapacities[candCache])
                 {
                     score[candCache, candVideo] = 0;
                     continue;
                 }
                 videoPlacements[candCache, candVideo] = true;
                 cacheFreeCapacities[candCache] -= videoSizes[candVideo];
-                FillVideoEconomies(score, candVideo, videoPlacements, latencies, requests, videoSizes);
+                for (int v = 0; v < videosCount; v++)
+                {
+                    FillVideoEconomies(score, v, videoPlacements, latencies, requests, videoSizes);
+                }
             }
 
             using (var sw = new StreamWriter(Path.GetFileNameWithoutExtension(infile) + ".out"))
@@ -169,38 +188,43 @@ namespace hashCaches
         {
             for (int c = 0; c < cachesCount; c++)
             {
-                double placementEconomy = 0;
-                for (int r = 0; r < requestsCount; r++)
+                int placementEconomy = 0;
+                Request[] relevantRequests = cacheVideoRequests[c, v];
+                if (relevantRequests == null) continue;
+                
+                Request[] thisVideoRequests;
+                if (!videoRequests.TryGetValue(v, out thisVideoRequests))
                 {
-                    var request = requests[r];
-                    if (request.Video == v)
-                    {
-                        var thisCacheLatency = latencies[c, request.Endpoint];
-
-                        if (latencies[cachesCount, request.Endpoint] == thisCacheLatency)
-                            continue;
-                        var otherBestLatency = Int32.MaxValue;
-                        for (int c2 = 0; c2 < cachesCount; c2++)
-                        {
-                            if (videoPlacements[c2, v])
-                            {
-                                var candLatency = latencies[c2, request.Endpoint];
-                                if (candLatency < otherBestLatency)
-                                    otherBestLatency = candLatency;
-                            }
-                        }
-                        if (otherBestLatency <= thisCacheLatency)
-                            continue;
-                        int thisCacheGain;
-                        if (otherBestLatency == Int32.MaxValue)
-                            thisCacheGain = latencies[cachesCount, request.Endpoint] - thisCacheLatency;
-                        else
-                            thisCacheGain = otherBestLatency - thisCacheLatency;
-                        placementEconomy +=
-                            (double)request.Number * thisCacheGain / videoSizes[v];
-                    }
+                    continue;
                 }
-                score[c, v] = placementEconomy;
+                for (int r = 0; r < thisVideoRequests.Length; r++)
+                {
+                    var request = thisVideoRequests[r];
+                    var thisCacheLatency = latencies[c, request.Endpoint];
+
+                    if (latencies[cachesCount, request.Endpoint] == thisCacheLatency)
+                        continue;
+                    var otherBestLatency = Int32.MaxValue;
+                    for (int c2 = 0; c2 < cachesCount; c2++)
+                    {
+                        if (videoPlacements[c2, v])
+                        {
+                            var candLatency = latencies[c2, request.Endpoint];
+                            if (candLatency < otherBestLatency)
+                                otherBestLatency = candLatency;
+                        }
+                    }
+                    if (otherBestLatency <= thisCacheLatency)
+                        continue;
+                    int thisCacheGain;
+                    if (otherBestLatency == Int32.MaxValue)
+                        thisCacheGain = latencies[cachesCount, request.Endpoint] - thisCacheLatency;
+                    else
+                        thisCacheGain = otherBestLatency - thisCacheLatency;
+                    placementEconomy +=
+                        request.Number * thisCacheGain;
+                }
+                score[c, v] = (double)placementEconomy / videoSizes[v];
             }
         }
     }

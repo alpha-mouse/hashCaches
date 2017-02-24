@@ -101,25 +101,6 @@ namespace hashCaches
 
             double[,] score = new double[cachesCount, videosCount];
 
-            //for (int c = 0; c < cachesCount; c++)
-            //{
-            //    for (int v = 0; v < videosCount; v++)
-            //    {
-            //        double placementEconomy = 0;
-            //        for (int r = 0; r < requestsCount; r++)
-            //        {
-            //            var request = requests[r];
-            //            if (request.Video == v)
-            //            {
-            //                placementEconomy +=
-            //                    request.Number * latencies[c, request.Endpoint] / videoSizes[v];
-            //            }
-            //
-            //        }
-            //        score[c, v] = placementEconomy;
-            //    }
-            //}
-
             int[] cacheFreeCapacities = new int[cachesCount];
             for (int c = 0; c < cachesCount; c++)
             {
@@ -135,28 +116,41 @@ namespace hashCaches
             Console.WriteLine("Economies");
             order.Sort((p1, p2) => -p1.score.CompareTo(p2.score));
             Console.WriteLine("Sorted");
-            for (int i = 0; i < order.Count; i++)
+            while (true)
             {
-                var candCache = order[i].c;
-                var candVideo = order[i].v;
-                var sss = order[i].score;
-                if (i%1000 ==0) Console.WriteLine(i);
-                if (sss == 0)
-                    break;
-                if (videoPlacements[candCache, candVideo])
+                Console.WriteLine("round");
+                bool somethingdone = false;
+                for (int i = 0; i < 1000 && i < order.Count; i++)
                 {
-                    score[candCache, candVideo] = 0;
-                    continue;
+                    var candCache = order[i].c;
+                    var candVideo = order[i].v;
+                    var sss = order[i].score;
+                    if (sss == 0)
+                        goto done;
+                    if (videoPlacements[candCache, candVideo])
+                    {
+                        //score[candCache, candVideo] = 0;
+                        continue;
+                    }
+                    if (videoSizes[candVideo] > cacheFreeCapacities[candCache])
+                    {
+                        //score[candCache, candVideo] = 0;
+                        continue;
+                    }
+                    somethingdone = true;
+                    videoPlacements[candCache, candVideo] = true;
+                    cacheFreeCapacities[candCache] -= videoSizes[candVideo];
                 }
-                if (videoSizes[candVideo] > cacheFreeCapacities[candCache])
+                if (!somethingdone) goto done;
+                Console.WriteLine("recalc");
+                order.Clear();
+                for (int v = 0; v < videosCount; v++)
                 {
-                    score[candCache, candVideo] = 0;
-                    continue;
+                    FillVideoEconomies(score, v, videoPlacements, latencies, requests, videoSizes, order);
                 }
-                videoPlacements[candCache, candVideo] = true;
-                cacheFreeCapacities[candCache] -= videoSizes[candVideo];
+                order.Sort((p1, p2) => -p1.score.CompareTo(p2.score));
             }
-            
+            done:
             //while (true)
             //{
             //    var bestEconomy = ArgMax(score);
@@ -255,7 +249,7 @@ namespace hashCaches
                         request.Number * thisCacheGain;
                 }
                 var sss = (double)placementEconomy / videoSizes[v];
-                score[c, v] = sss;
+                //score[c, v] = sss;
                 order.Add(new Point
                 {
                     c = c,
